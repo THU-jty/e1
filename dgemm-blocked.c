@@ -1,36 +1,36 @@
 const char* dgemm_desc = "kji";
 
 #if !defined(BLOCK_SIZE)
-#define BLOCK_SIZE 67
+#define BLOCK_SIZE_I 2
+#define BLOCK_SIZE_J 65
+#define BLOCK_SIZE_K 65
+
+#define INNER_I 2
+#define INNER_J 2
+#define INNER_K 2
 #endif
 
 #include<stdlib.h>
 #define min(a,b) (((a)<(b))?(a):(b))
-#define rep(j) for(int j = 0; j < lda; j += BLOCK_SIZE)
-#define repj for (int j = 0; j < N; ++j)
-#define repi for (int i = 0; i < M; ++i)
+#define perj for(int j = 0; j < lda; j += BLOCK_SIZE_J)
+#define peri for(int i = 0; i < lda; i += BLOCK_SIZE_I)
+#define perk for(int k = 0; k < lda; k += BLOCK_SIZE_K)
+#define repj for (int j = 0; j < J; ++j)
+#define repi for (int i = 0; i < I; ++i)
 #define repk for (int k = 0; k < K; ++k)
 	
 /* This auxiliary subroutine performs a smaller dgemm operation
  *  C := C + A * B
  * where C is M-by-N, A is M-by-K, and B is K-by-N. */
-static void do_block (int lda, int M, int N, int K, double* A, double* B, double* C)
+static void do_block (int lda, int I, int J, int K, double* A, double* B, double* C)
 {
- // repj
-	// repk{
-		// double tmp = B[k+j*lda];
-		// repi{
-			// C[i+j*lda] += A[i*K+k]*tmp;
-		// }
-	// }
+ repi
 	repj{
-		repi{
-			double tmp = C[i+j*lda];
-			repk{
-				tmp += A[i*K+k]*B[k+j*lda];
-			}
-			C[i+j*lda] = tmp;
+		double tmp = C[i*J+j];
+		repk{
+			tmp += A[i*K+k]*B[k+j*K];
 		}
+		C[i*J+j] = tmp;
 	}
 }
 
@@ -60,26 +60,45 @@ static void do_block (int lda, int M, int N, int K, double* A, double* B, double
 void square_dgemm (int lda, double* A, double* B, double* C)
 {
   /* For each block-row of A */
-  double *buf = (double *)malloc( sizeof(double)*BLOCK_SIZE*BLOCK_SIZE );
-  int N, M, K;
-  rep(k){
+  double *buf = (double *)malloc( sizeof(double)*BLOCK_SIZE_J*BLOCK_SIZE_K );
+  double *cuf = (double *)malloc( sizeof(double)*BLOCK_SIZE_K*lda );
+  double *auf = (double *)malloc( sizeof(double)*BLOCK_SIZE_J*lda );
+  int I, J, K;
+  perk{
     /* For each block-column of B */
-	K = min (BLOCK_SIZE, lda-k);
-	rep(i){
-		M = min (BLOCK_SIZE, lda-i);
+	K = min (BLOCK_SIZE_K, lda-k);
+	int a_cnt = 0;
+	for( int i = 0; i < lda; i ++ ){
+		for( int kk = 0; kk < K; kk ++ )
+			auf[a_cnt++] = A[ (k+kk)*lda+i ];
+	}
+	int t = 0;
+	perj{
+		J = min (BLOCK_SIZE_J, lda-j);
 		int cnt = 0;
-		for( int p = 0; p < M; p ++ ){
+		for( int p = 0; p < J; p ++ ){
 			for( int s = 0; s < K; s ++ ){
-				buf[ cnt++ ] = A[ (k+s)*lda+i+p ];
+				buf[ cnt++ ] = B[ (j+p)*lda+k+s ];
 			}
 		}
-		rep(j){
-			N = min( BLOCK_SIZE, lda-j );
-			do_block(lda, M, N, K, buf, B + k + j*lda, C + i + j*lda);
+		peri{
+			I = min( BLOCK_SIZE_I, lda-i );
+			do_block(lda, I, J, K, auf + K*i, buf, cuf + i*J );
 		}
+		cnt = 0;
+		for( int ii = 0; ii < lda; ii ++ )
+			for( int jj = 0; jj < J; jj ++ ){
+				double tmp = cuf[ cnt ];
+				cuf[ cnt++ ] = 0.0;
+				C[ (jj+j)*lda + ii ] += tmp;
+			}
+		
 	}
+	
   }
   free(buf);
+  free(auf);
+  free(cuf);
  }
  
  /*
