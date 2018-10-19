@@ -1,11 +1,12 @@
 const char* dgemm_desc = "kji";
 
 #if !defined(BLOCK_SIZE)
-#define BLOCK_SIZE_I 2
-#define BLOCK_SIZE_J 65
-#define BLOCK_SIZE_K 65
+#define BLOCK_SIZE_I 8
+#define BLOCK_SIZE_J 64
+#define BLOCK_SIZE_K 128
 
-#define INNER_I 2
+#define MR 8
+
 #define INNER_J 2
 #define INNER_K 2
 #endif
@@ -18,7 +19,7 @@ const char* dgemm_desc = "kji";
 #define repj for (int j = 0; j < J; ++j)
 #define repi for (int i = 0; i < I; ++i)
 #define repk for (int k = 0; k < K; ++k)
-	
+
 /* This auxiliary subroutine performs a smaller dgemm operation
  *  C := C + A * B
  * where C is M-by-N, A is M-by-K, and B is K-by-N. */
@@ -26,43 +27,23 @@ static void do_block (int lda, int I, int J, int K, double* A, double* B, double
 {
  repi
 	repj{
-		double tmp = C[i*J+j];
+		double tmp = 0.0;
 		repk{
 			tmp += A[i*K+k]*B[k+j*K];
 		}
-		C[i*J+j] = tmp;
+		C[i+j*I] = tmp;
 	}
 }
-
-/* This routine performs a dgemm operation
- *  C := C + A * B
- * where A, B, and C are lda-by-lda matrices stored in column-major format.
- * On exit, A and B maintain their input values. */
-// void square_dgemm (int lda, double* A, double* B, double* C)
-// {
-  // /* For each block-row of A */
-  // for (int j = 0; j < lda; j += BLOCK_SIZE)
-    // /* For each block-column of B */
-    // for (int k = 0; k < lda; k += BLOCK_SIZE)
-      // /* Accumulate block dgemms into block of C */
-      // for (int i = 0; i < lda; i += BLOCK_SIZE)
-      // {
-	// /* Correct block dimensions if block "goes off edge of" the matrix */
-	// int M = min (BLOCK_SIZE, lda-i);
-	// int N = min (BLOCK_SIZE, lda-j);
-	// int K = min (BLOCK_SIZE, lda-k);
-
-	// /* Perform individual block dgemm */
-	// do_block(lda, M, N, K, A + i + k*lda, B + k + j*lda, C + i + j*lda);
-      // }
-// }
 
 void square_dgemm (int lda, double* A, double* B, double* C)
 {
   /* For each block-row of A */
-  double *buf = (double *)malloc( sizeof(double)*BLOCK_SIZE_J*BLOCK_SIZE_K );
-  double *cuf = (double *)malloc( sizeof(double)*BLOCK_SIZE_K*lda );
-  double *auf = (double *)malloc( sizeof(double)*BLOCK_SIZE_J*lda );
+  // double *buf = (double *)_mm_malloc( sizeof(double)*BLOCK_SIZE_J*BLOCK_SIZE_K, 64);
+  // double *cuf = (double *)_mm_malloc( sizeof(double)*BLOCK_SIZE_J*BLOCK_SIZE_I, 64 );
+  // double *auf = (double *)_mm_malloc( sizeof(double)*BLOCK_SIZE_K*lda, 64 );
+  double *buf = (double *)malloc( sizeof(double)*BLOCK_SIZE_J*BLOCK_SIZE_K);
+  double *cuf = (double *)malloc( sizeof(double)*BLOCK_SIZE_J*BLOCK_SIZE_I);
+  double *auf = (double *)malloc( sizeof(double)*BLOCK_SIZE_K*lda);
   int I, J, K;
   perk{
     /* For each block-column of B */
@@ -83,36 +64,38 @@ void square_dgemm (int lda, double* A, double* B, double* C)
 		}
 		peri{
 			I = min( BLOCK_SIZE_I, lda-i );
-			do_block(lda, I, J, K, auf + K*i, buf, cuf + i*J );
-		}
-		cnt = 0;
-		for( int ii = 0; ii < lda; ii ++ )
-			for( int jj = 0; jj < J; jj ++ ){
-				double tmp = cuf[ cnt ];
-				cuf[ cnt++ ] = 0.0;
-				C[ (jj+j)*lda + ii ] += tmp;
+			for( int p = 0; p < J; p += MR ){
+				int P = min( MR, J-p );
+				do_block(lda, I, P, K, auf + K*i, buf + K*p, cuf + p*I );
 			}
-		
+			int cnt = 0;
+            for( int jj = 0; jj < J; jj ++ ){
+                for( int ii = 0; ii < I; ii ++ ){
+					C[ (jj+j)*lda + ii+i ] += cuf[ cnt++ ];
+				}
+			}
+		}
+
 	}
-	
+
   }
   free(buf);
   free(auf);
   free(cuf);
  }
- 
+
  /*
  C[i+j*lda] += A[i+k*lda] * B[k+j*K];
- 
+
  i j k
  repi
 	repj{
 	 double tmp = C[i+j*lda];
 	 repk
 	   tmp += A[i+k*lda] * B[k+j*K];
-	 C[i+j*lda] = tmp;  
+	 C[i+j*lda] = tmp;
 	}
- 
+
  i k j
  repi
 	repk{
@@ -121,16 +104,16 @@ void square_dgemm (int lda, double* A, double* B, double* C)
 			C[i+j*lda] += tmp * B[k+j*K];
 		}
 	}
- 
+
  j i k
  repj
 	repi{
 	 double tmp = C[i+j*lda];
 	 repk
 	   tmp += A[i+k*lda] * B[k+j*K];
-	 C[i+j*lda] = tmp; 
+	 C[i+j*lda] = tmp;
 	}
- 
+
  j k i
    repj
 	repk{
@@ -139,7 +122,7 @@ void square_dgemm (int lda, double* A, double* B, double* C)
 			C[i+j*lda] += A[i+k*lda]*tmp;
 		}
 	}
- 
+
  k i j
  repk
     repi{
@@ -148,7 +131,7 @@ void square_dgemm (int lda, double* A, double* B, double* C)
 			 C[i+j*lda] += tmp * B[k+j*K];
 		}
 	}
- 
+
  k j i
  repk
 	repj{
@@ -157,5 +140,5 @@ void square_dgemm (int lda, double* A, double* B, double* C)
 			C[i+j*lda] += A[i+k*lda]*tmp;
 		}
 	}
- 
+
  */
