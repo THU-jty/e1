@@ -1,7 +1,7 @@
 const char* dgemm_desc = "kji";
 
 #if !defined(BLOCK_SIZE)
-#define BLOCK_SIZE 65
+#define BLOCK_SIZE 67
 #endif
 
 #include<stdlib.h>
@@ -16,11 +16,20 @@ const char* dgemm_desc = "kji";
  * where C is M-by-N, A is M-by-K, and B is K-by-N. */
 static void do_block (int lda, int M, int N, int K, double* A, double* B, double* C)
 {
- repk
+ // repj
+	// repk{
+		// double tmp = B[k+j*lda];
+		// repi{
+			// C[i+j*lda] += A[i*K+k]*tmp;
+		// }
+	// }
 	repj{
-		double tmp = B[k+j*K];
 		repi{
-			C[i+j*lda] += A[i+k*lda]*tmp;
+			double tmp = C[i+j*lda];
+			repk{
+				tmp += A[i*K+k]*B[k+j*lda];
+			}
+			C[i+j*lda] = tmp;
 		}
 	}
 }
@@ -56,17 +65,17 @@ void square_dgemm (int lda, double* A, double* B, double* C)
   rep(k){
     /* For each block-column of B */
 	K = min (BLOCK_SIZE, lda-k);
-	rep(j){
-		int N = min( BLOCK_SIZE, lda-j );
+	rep(i){
+		M = min (BLOCK_SIZE, lda-i);
 		int cnt = 0;
-		for( int p = 0; p < N; p ++ ){
+		for( int p = 0; p < M; p ++ ){
 			for( int s = 0; s < K; s ++ ){
-				buf[ cnt++ ] = B[ (j+p)*lda+k+s ];
+				buf[ cnt++ ] = A[ (k+s)*lda+i+p ];
 			}
 		}
-		rep(i){
-			M = min (BLOCK_SIZE, lda-i);
-			do_block(lda, M, N, K, A + i + k*lda, buf, C + i + j*lda);
+		rep(j){
+			N = min( BLOCK_SIZE, lda-j );
+			do_block(lda, M, N, K, buf, B + k + j*lda, C + i + j*lda);
 		}
 	}
   }
