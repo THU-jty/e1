@@ -1,16 +1,15 @@
 const char* dgemm_desc = "kji";
 
 #if !defined(BLOCK_SIZE)
-#define BLOCK_SIZE_I 8
-#define BLOCK_SIZE_J 48
-#define BLOCK_SIZE_K 128
+int BLOCK_SIZE_I = 8;
+int BLOCK_SIZE_J = 48;
+int BLOCK_SIZE_K = 256;
 
 #define MR 6
 
 #define DI 4
 #define DJ 3
 #define DK 4
-
 #endif
 
 #include<stdlib.h>
@@ -63,6 +62,7 @@ static void do_block (int lda, int I, int J, int K, double* A, double* B, double
 		}
 	}
 	
+	if( I == II && J == JJ && K == KK ) return ;
 	//(1,1)*(1,1)
 	for( int j = 0; j < JJ; j ++ ){
 		for( int i = 0; i < II; i ++ ){
@@ -111,6 +111,19 @@ static void do_block (int lda, int I, int J, int K, double* A, double* B, double
 
 void square_dgemm (int lda, double* A, double* B, double* C)
 {
+  if( lda <= 70 ){
+	    int n = lda;
+		for (int j = 0; j < n; ++j) 
+		{
+			for( int k = 0; k < n; k++ ){
+				double tmp = B[k+j*n];
+				for (int i = 0; i < n; ++i)	
+					C[i+j*n] += A[i+k*n] * tmp;
+			}
+		}
+		return ;
+  }
+  
   /* For each block-row of A */
 #ifdef MM
   double *buf = (double *)_mm_malloc( sizeof(double)*BLOCK_SIZE_J*BLOCK_SIZE_K, 4096);
